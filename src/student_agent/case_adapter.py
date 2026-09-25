@@ -37,6 +37,33 @@ CATALOG = {
     "get_policy": _spec("policy", "policy_version", "policy-agent"),
 }
 
+_PRODUCT_REQUEST_MARKERS = (
+    "product",
+    "item",
+    "sản phẩm",
+    "mặt hàng",
+    "hàng bị lỗi",
+    "hàng bị hỏng",
+)
+
+
+def requires_product_context(case: dict[str, Any]) -> bool:
+    """Fetch product details only when the scoped request asks about the item."""
+    if not case.get("investigation_scope", {}).get("include_product_context"):
+        return False
+
+    request = case.get("customer_request", {})
+    claims = request.get("claims", [])
+    topics = {
+        claim.get("topic", "").casefold()
+        for claim in claims
+        if isinstance(claim, dict) and isinstance(claim.get("topic"), str)
+    }
+    message = str(request.get("message", "")).casefold()
+    return any(topic.startswith(("product_", "item_")) for topic in topics) or any(
+        marker in message for marker in _PRODUCT_REQUEST_MARKERS
+    )
+
 
 def _result(message: TaskMessage, facts: Mapping[str, Any], refs: list[str]) -> TaskResult:
     return TaskResult(
@@ -111,7 +138,7 @@ def make_handlers(case: dict[str, Any], evidence: ScopedEvidence) -> Mapping[Act
         scope = dict(message.facts)
         data = await fetch(agent, "get_order_items", refs, order_id=scope["order_id"])
         facts = analyze_items(records(data), scope)
-        if case.get("investigation_scope", {}).get("include_product_context"):
+        if requires_product_context(case):
             products = records(
                 await fetch(agent, "get_product_context", refs, order_id=scope["order_id"])
             )
@@ -234,6 +261,12 @@ def build_output(case: dict[str, Any], results: Mapping[str, TaskResult]) -> dic
         decision["assessment"]["confidence"],
     )
     claims = []
+    refund_lines = decision["financial_resolution"].get("refund_lines", [])
+    shipment_refund_basis = any(
+        isinstance(line, dict)
+        and str(line.get("reason_code", "")).startswith("LATE_DELIVERY_")
+        for line in refund_lines
+    )
     for claim in case.get("customer_request", {}).get("claims", [])[:5]:
         topic = claim.get("topic")
         relevant = {"entity", "policy", "order"} | (
@@ -241,6 +274,8 @@ def build_output(case: dict[str, Any], results: Mapping[str, TaskResult]) -> dic
             if topic in {"late_delivery_seller", "late_delivery_logistics"}
             else {"payment"}
         )
+        if topic == "requested_full_refund" and shipment_refund_basis:
+            relevant.add("shipment")
         verdict = "insufficient_evidence"
         if issue != "insufficient_evidence":
             if topic == "requested_full_refund":

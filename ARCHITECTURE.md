@@ -104,11 +104,12 @@ only when the relevant payment/refund or shipment evidence has been consumed.
 The workflow schedules at most ten logical MCP calls per case and at most three
 candidate lookups when no exact reference exists. A transient transport retry
 may add one physical attempt for a failed call. With an exact claimed order,
-the standard plan performs one order lookup, one customer-history lookup, payment and
-policy investigation, and only the item, shipment, or refund specialist
-required by the business claim. This normally uses four to seven calls. Seller
-and product tools are not called unless a future
-claim requires facts unavailable from item or shipment evidence.
+the standard plan performs customer-history, order, item, shipment, payment,
+and policy lookups. It also checks the refund timeline for refund claims and
+fetches product context only when an in-scope claim or request message asks
+about product details. This normally uses six calls, with one additional call
+for a refund claim or a product-detail request. Seller data is not fetched
+unless a future claim requires facts unavailable from item or shipment evidence.
 Arguments are bound to discovered input schemas; missing required fields cause
 the tool to be skipped. Duplicate `(tool, arguments)` calls are cached only for
 the current case. There are no broad scans, unbounded retries, or cross-case
