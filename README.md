@@ -43,7 +43,7 @@ day09 --help
 
 ```dotenv
 COMPETITION_API_URL=http://127.0.0.1:8081
-COMPETITION_TEAM_API_KEY=sk-team-your_key
+COMPETITION_TEAM_API_KEY=<your-issued-team-api-key>
 MCP_ENDPOINT=http://127.0.0.1:8001/mcp
 ```
 
@@ -147,9 +147,16 @@ Hoàn thiện mô tả thiết kế trong `ARCHITECTURE.md`.
 ## 6. Chạy và kiểm tra
 
 ```bash
-day09 run
+day09 run --concurrency 4
 day09 validate
 ```
+
+`--concurrency` nhận giá trị từ 1 đến 32 và mặc định là 4. Lệnh `run` mặc định
+giữ các case đã finalize và chỉ xử lý phần còn thiếu, tránh tạo thêm MCP audit call.
+Chỉ dùng `day09 run --concurrency 4 --fresh` khi thật sự cần thu thập lại toàn bộ
+evidence. Lệnh `--fresh` ghi kết quả mới vào `run-staging/active/` và có thể chạy
+lại để tiếp tục phần chưa hoàn thành. Output/trace/submission hiện tại chỉ được
+thay sau khi đủ 100 case và qua validate; bản cũ được lưu trong `run-backups/`.
 
 Kết quả được tạo tại:
 

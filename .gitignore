@@ -26,6 +26,8 @@ traces/*
 !traces/.gitkeep
 dist/*
 !dist/.gitkeep
+run-backups/
+run-staging/
 *.zip
 *.log
 

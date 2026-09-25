@@ -8,12 +8,23 @@ from pathlib import Path
 from typing import Any
 
 from . import OUTPUT_SCHEMA_VERSION, VARIANT_ID
+from .case_adapter import CATALOG
 from .cases import CaseSet
 from .contracts import Contracts
+from .verifier_agent import verify_output
 
 SECRET_PATTERN = re.compile(r"sk-team-[A-Za-z0-9_-]{8,}")
 MAX_FILE_BYTES = 1024 * 1024
 MAX_SUBMISSION_BYTES = 12 * 1024 * 1024
+LIFECYCLE = (
+    "case_received",
+    "task_assigned",
+    "tool_result_consumed",
+    "handoff",
+    "policy_decided",
+    "verification_completed",
+    "case_finalized",
+)
 
 
 def _json_object(path: Path) -> dict[str, Any]:
@@ -65,6 +76,7 @@ def validate_artifacts(
         raise ValueError("traces/trace.jsonl is missing or not UTF-8") from exc
     normalized_lines: list[str] = []
     seen_events: set[str] = set()
+    events_by_case: dict[str, list[dict[str, Any]]] = {case_id: [] for case_id in case_set.case_ids}
     for number, line in enumerate(trace_lines, 1):
         if not line.strip():
             continue
@@ -78,7 +90,53 @@ def validate_artifacts(
         if event["event_id"] in seen_events:
             raise ValueError(f"traces/trace.jsonl:{number}: duplicate event_id")
         seen_events.add(event["event_id"])
+        events_by_case[event["case_id"]].append(event)
         normalized_lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+
+    ref_owners: dict[str, str] = {}
+    for case_id in case_set.case_ids:
+        events = events_by_case[case_id]
+        event_types = [event["event_type"] for event in events]
+        position = -1
+        for required in LIFECYCLE:
+            try:
+                position = event_types.index(required, position + 1)
+            except ValueError as exc:
+                raise ValueError(
+                    f"trace lifecycle for {case_id} is missing or out of order: {required}"
+                ) from exc
+        if event_types[0] != "case_received" or event_types[-1] != "case_finalized":
+            raise ValueError(f"trace lifecycle for {case_id} has invalid boundaries")
+        if event_types.count("case_received") != 1 or event_types.count("case_finalized") != 1:
+            raise ValueError(f"trace lifecycle for {case_id} has duplicate boundaries")
+        consumed_refs = {
+            ref
+            for event in events
+            if event["event_type"] == "tool_result_consumed"
+            for ref in event.get("evidence_refs", [])
+        }
+        if not set(outputs[case_id]["evidence_refs"]) <= consumed_refs:
+            raise ValueError(f"output evidence for {case_id} is not linked to consumption trace")
+        domains = {}
+        for event in events:
+            if event["event_type"] != "tool_result_consumed":
+                continue
+            spec = CATALOG.get(event.get("tool_name"))
+            if spec is None:
+                raise ValueError(f"unknown tool in evidence trace for {case_id}")
+            for ref in event.get("evidence_refs", []):
+                if ref in ref_owners and ref_owners[ref] != case_id:
+                    raise ValueError("evidence reference appears in more than one case")
+                ref_owners[ref] = case_id
+                domains[ref] = spec.domain
+        verify_output(
+            outputs[case_id],
+            case_id=case_id,
+            consumed_refs=frozenset(consumed_refs),
+            contracts=contracts,
+            trace=None,
+            evidence_domains=domains,
+        )
 
     serialized = [json.dumps(value, ensure_ascii=False) for value in outputs.values()]
     if SECRET_PATTERN.search("\n".join([*serialized, *normalized_lines])):
