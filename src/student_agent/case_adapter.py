@@ -261,12 +261,6 @@ def build_output(case: dict[str, Any], results: Mapping[str, TaskResult]) -> dic
         decision["assessment"]["confidence"],
     )
     claims = []
-    refund_lines = decision["financial_resolution"].get("refund_lines", [])
-    shipment_refund_basis = any(
-        isinstance(line, dict)
-        and str(line.get("reason_code", "")).startswith("LATE_DELIVERY_")
-        for line in refund_lines
-    )
     for claim in case.get("customer_request", {}).get("claims", [])[:5]:
         topic = claim.get("topic")
         relevant = {"entity", "policy", "order"} | (
@@ -274,8 +268,6 @@ def build_output(case: dict[str, Any], results: Mapping[str, TaskResult]) -> dic
             if topic in {"late_delivery_seller", "late_delivery_logistics"}
             else {"payment"}
         )
-        if topic == "requested_full_refund" and shipment_refund_basis:
-            relevant.add("shipment")
         verdict = "insufficient_evidence"
         if issue != "insufficient_evidence":
             if topic == "requested_full_refund":
